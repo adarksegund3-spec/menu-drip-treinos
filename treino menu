@@ -25,7 +25,7 @@ end
 -- Constantes
 -- =========================================================
 local HUB_NAME = "Drip treinos"
-local CREATOR = "Angel"
+local CREATOR = "Angel & Jp"
 local SERVER = "drip menu"
 local THEME_NAME = "DarkPurple"
 local PURPLE = Color3.fromHex("#8B5CF6")
