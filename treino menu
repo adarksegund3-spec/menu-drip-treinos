@@ -1,0 +1,613 @@
+--[[ Drip treinos | WindUI | Dark Purple | v1.7 ]]
+
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local LocalPlayer = Players.LocalPlayer
+
+local ENV = (getgenv and getgenv()) or _G
+
+-- Evita interfaces duplicadas ao reexecutar
+if ENV.__TreinamentoHub and ENV.__TreinamentoHub.Window then
+    pcall(function() ENV.__TreinamentoHub.Window:Destroy() end)
+    ENV.__TreinamentoHub = nil
+end
+
+-- Carrega a WindUI
+local okLib, WindUI = pcall(function()
+    return loadstring(game:HttpGet("https://raw.githubusercontent.com/Footagesus/WindUI/main/dist/main.lua"))()
+end)
+if not okLib or type(WindUI) ~= "table" then
+    warn("[Hub] Falha ao carregar a WindUI: " .. tostring(WindUI))
+    return
+end
+
+-- =========================================================
+-- Constantes
+-- =========================================================
+local HUB_NAME = "Drip treinos"
+local CREATOR = "Angel"
+local SERVER = "drip menu"
+local THEME_NAME = "DarkPurple"
+local PURPLE = Color3.fromHex("#8B5CF6")
+
+-- Fontes de consulta (documentos oficiais) — links preservados
+local DOCS = {
+    ["Praças"] = "https://docs.google.com/document/d/1BTZxyGfesMDx0vsWFIHZZdrCNS-Mc7-i/mobilebasic",
+    ["Graduados"] = "https://docs.google.com/document/d/1BTZxyGfesMDx0vsWFIHZZdrCNS-Mc7-i/mobilebasic",
+    ["AMAN"] = "https://docs.google.com/document/d/1rGWK2cTWR6vTqvKBmYa5yQd1oFCLIUBXcUf1A8z9Q5M/mobilebasic",
+    ["Oficiais Subalternos"] = "https://docs.google.com/document/d/1S0LP2ICITszAF8_UHnASkRwN1t5feusy/mobilebasic",
+    ["Oficiais Intermediários"] = "https://docs.google.com/document/d/1S0LP2ICITszAF8_UHnASkRwN1t5feusy/mobilebasic",
+    ["Oficiais Superiores"] = "https://docs.google.com/document/d/1S0LP2ICITszAF8_UHnASkRwN1t5feusy/mobilebasic",
+    ["EPC"] = "https://docs.google.com/document/d/1nlg7B-87cGz7rKP5lPYfnjRjE7Gutq27W49hY7dFZtg/mobilebasic",
+    ["APG"] = "https://docs.google.com/document/u/0/d/1VsaQLDsDGU5VsGoUxQP1SELkcQOW4Ai1WKp3ZN4irC8/mobilebasic",
+    ["CPE"] = "https://docs.google.com/document/d/15CgxiFnRXHTK-a1fqvBLzJW2Xh8w096JSOBOrqJIlLc/mobilebasic",
+}
+
+local CATEGORIES = {
+    "Praças", "Graduados", "AMAN",
+    "Oficiais Subalternos", "Oficiais Intermediários", "Oficiais Superiores",
+    "EPC", "APG", "CPE",
+}
+
+local CATEGORY_ICONS = {
+    ["Praças"] = "shield", ["Graduados"] = "star", ["AMAN"] = "graduation-cap",
+    ["Oficiais Subalternos"] = "badge", ["Oficiais Intermediários"] = "badge-check",
+    ["Oficiais Superiores"] = "crown", ["EPC"] = "book-open", ["APG"] = "medal", ["CPE"] = "flag",
+}
+
+-- Paleta harmoniosa (tons suaves que combinam com o roxo do tema)
+local CATEGORY_COLORS = {
+    ["Praças"] = Color3.fromHex("#5FB98A"),
+    ["Graduados"] = Color3.fromHex("#D9A441"),
+    ["AMAN"] = Color3.fromHex("#60A5FA"),
+    ["Oficiais Subalternos"] = Color3.fromHex("#A78BFA"),
+    ["Oficiais Intermediários"] = Color3.fromHex("#8B5CF6"),
+    ["Oficiais Superiores"] = Color3.fromHex("#7C3AED"),
+    ["EPC"] = Color3.fromHex("#F472B6"),
+    ["APG"] = Color3.fromHex("#E0B04A"),
+    ["CPE"] = Color3.fromHex("#F87171"),
+}
+
+local PRESENTATION = string.format(
+    "Olá! Meu nome é %s e serei o instrutor de vocês hoje. "
+    .. "Peço que mantenham o respeito e a disciplina durante o treinamento, "
+    .. "pois espero comprometimento e atenção de todos.",
+    LocalPlayer.Name
+)
+
+-- =========================================================
+-- CONTEÚDO (conferido nos documentos oficiais)
+--   1º bloco = destaque aberto (pontuação mínima)
+--   demais   = fechados, na ordem do treinamento
+-- Parkours: sempre a versão A, mostrando só "Parkour X — tempo"
+-- =========================================================
+local BLOCK_ICONS = {
+    ["Pontuação"] = "trophy", ["Polichinelos"] = "activity", ["Texto"] = "pen-line",
+    ["Parkours"] = "mountain", ["Torre"] = "building-2", ["Perguntas"] = "message-circle",
+    ["Comandos"] = "megaphone", ["PvP"] = "swords", ["Desempate"] = "scale",
+}
+
+local function P(title, lines)
+    return {
+        title = title,
+        opened = false,
+        lines = lines,
+        icon = BLOCK_ICONS[string.match(title, "^(%S+)") or ""],
+    }
+end
+
+local function minimo(texto)
+    return { title = "Pontuação mínima para aprovação", desc = texto, opened = true, icon = "trophy" }
+end
+
+-- Parkours (versão A): dois por linha; nota opcional
+local function parkours(a, b, c, d, nota)
+    local lines = {
+        "Parkour 1 — " .. a .. " s",
+        "Parkour 2 — " .. b .. " s",
+        "Parkour 3 — " .. c .. " s",
+        "Parkour 4 — " .. d .. " s",
+    }
+    if nota then table.insert(lines, nota) end
+    return P("Parkours — 1,0 ponto cada", lines)
+end
+
+local function torre(pc, cel)
+    return P("Torre", { "PC e Console — " .. pc .. " s", "Celular — " .. cel .. " s" })
+end
+
+-- Texto gramatical padrão (0 / 1 / 2 pontos por faixa de erros)
+local function texto(tempo, linhas, tema, limite)
+    local faixa = (limite == 1) and "1 erro" or ("1 a " .. limite .. " erros")
+    return P("Texto gramatical — 2,0 pontos", {
+        "Tempo: " .. tempo .. ".",
+        "Mínimo de " .. linhas .. " linhas.",
+        "Tema: " .. tema .. ".",
+        "Mais de " .. limite .. " erros: sem pontos.",
+        faixa .. ": 1 ponto.",
+        "Nenhum erro: 2 pontos.",
+        "Fugiu do tema: sem pontos.",
+        "Sempre apontar o erro gramatical.",
+    })
+end
+
+local TEMA_EB = "Exército Brasileiro ou Exército Brasileiro do Delta"
+
+-- exato = true → "20 comandos" (CPE); senão "No máximo N comandos"
+local function comandos(n, exato)
+    local abertura = exato
+        and (n .. " comandos; qualquer erro = sem ponto.")
+        or ("No máximo " .. n .. " comandos; qualquer erro = sem ponto.")
+    return P("Comandos — 1,0 ponto", {
+        abertura,
+        "Direita / Esquerda / Retaguarda / Vanguarda volver!",
+        "Pode haver comandos falsos para testar.",
+        "Em call ou chat; o instrutor informa qual usará.",
+        "Virar um pouco no falso, ou para o lado errado, é erro.",
+    })
+end
+
+-- extras = true → inclui as regras de resposta múltipla / pergunta mal formulada
+local function perguntas(qtd, timer, regra, extras)
+    local lines = {
+        qtd .. " sobre o EB do Delta ou o Exército Brasileiro.",
+        regra,
+        "Timer: " .. timer .. " segundos.",
+        "Ao fim do timer, colocar as respostas na placa. Ninguém responde antes.",
+    }
+    if extras then
+        table.insert(lines, "Mais de 1 resposta correta: todas são aceitas.")
+        table.insert(lines, "Pergunta mal formulada deve ser refeita.")
+    end
+    return P("Perguntas — 1,0 ponto", lines)
+end
+
+local function desempate(max, pontos)
+    return P("Desempate", {
+        "Acima de " .. max .. " aprovados, decide o PvP de FAL.",
+        "Todos os aprovados fazem o PvP, mesmo com 10 ou " .. pontos .. " pontos.",
+    })
+end
+
+local function oficiais(heading, min, jj, p, t)
+    return {
+        heading = heading,
+        items = {
+            minimo(min .. " pontos"),
+            P("Polichinelos — 1,0 ponto", { jj }),
+            texto("350 segundos", 5, TEMA_EB, 2),
+            parkours(p[1], p[2], p[3], p[4]),
+            torre(t, t),
+            perguntas("2 perguntas", 30, "Valem 0,5 cada; só pontua quem acertar a pergunta.", true),
+        },
+    }
+end
+
+local CONTENT = {}
+
+CONTENT["Praças"] = {
+    heading = "CATEGORIA PRAÇAS",
+    items = {
+        minimo("4 pontos"),
+        P("Polichinelos — 1,0 ponto", { "150 JJs em 210 s." }),
+        texto("300 segundos", 4, TEMA_EB, 3),
+        parkours(35, 40, 30, 32),
+        torre(15, 16),
+        perguntas("1 pergunta", 40, "Só pontua quem acertar.", true),
+    },
+}
+
+CONTENT["Graduados"] = {
+    heading = "CATEGORIA GRADUADOS",
+    items = {
+        minimo("5 pontos"),
+        P("Polichinelos — 1,0 ponto", { "170 JJs em 230 s." }),
+        texto("300 segundos", 4, TEMA_EB, 3),
+        parkours(30, 35, 27, 29),
+        torre(15, 16),
+        perguntas("1 pergunta", 40, "Só pontua quem acertar.", true),
+    },
+}
+
+CONTENT["AMAN"] = {
+    heading = "AMAN — ACADEMIA MILITAR DAS AGULHAS NEGRAS",
+    items = {
+        minimo("7 pontos  ·  máx. 4 aprovados"),
+        P("Polichinelos — 1,0 ponto", { "PC e Console: 75 JJs.", "Celular: 100 JJs.", "Tempo: 100 segundos." }),
+        texto("400 segundos", 5, "Exército Brasileiro do Delta ou função de um Aspirante no EB", 3),
+        parkours(19, 22, 19, 17),
+        torre(12, 11),
+        comandos(12),
+        perguntas("2 perguntas", 25, "Só pontua quem acertar todas (não vale 0,5).", true),
+        desempate(4, 7),
+    },
+}
+
+CONTENT["Oficiais Subalternos"] = oficiais("OFICIAIS SUBALTERNOS", "5", "200 JJs em 260 s.", { 14, 17, 15, 13 }, 11)
+CONTENT["Oficiais Intermediários"] = oficiais("OFICIAIS INTERMEDIÁRIOS", "5,5", "250 JJs em 310 s.", { 13, 16, 14, 12 }, 11)
+CONTENT["Oficiais Superiores"] = oficiais("OFICIAIS SUPERIORES", "6", "320 JJs em 380 s.", { 12, 15, 13, 11 }, 10)
+
+CONTENT["EPC"] = {
+    heading = "EPC — ESCOLA PREPARATÓRIA DE CORONÉIS",
+    items = {
+        minimo("7 pontos  ·  máx. 3 aprovados"),
+        P("Polichinelos — 1,0 ponto", { "PC e Console: 80 JJs.", "Mobile: 115 JJs.", "Tempo: 100 segundos." }),
+        parkours(9, 13, 9, 10),
+        torre(8, 9),
+        texto("300 segundos", 5, TEMA_EB, 2),
+        comandos(10),
+        perguntas("2 perguntas", 30, "Só pontua quem acertar todas (não vale 0,5 por 1 acerto).", true),
+        desempate(3, 7),
+    },
+}
+
+CONTENT["APG"] = {
+    heading = "APG — ACADEMIA PREPARATÓRIA DE GENERAIS",
+    items = {
+        minimo("8 pontos  ·  máx. 2 aprovados"),
+        P("Polichinelos — 1,0 ponto", { "PC e Console: 82 JJs.", "Mobile: 120 JJs.", "Tempo: 100 segundos." }),
+        parkours(11, 13, 10, 6, "Parkour 4 é com burla; os demais, sem burla."),
+        torre(7, 8),
+        P("PvP — 2,0 pontos", {
+            "Somente de FAL; lutas 2v2 (se não der, 1v1).",
+            "Auxiliares anotam nomes e pontos do round.",
+            "Vence 2 rodadas = 2 pontos (1 rodada não pontua).",
+            "Round é absoluto: não reinicia por travamento ou queda.",
+            "Quem sair da arena desclassifica o time; adversário ganha os 2 pontos.",
+            "Demora: timer de 10 s e rush sem proteção das paredes.",
+            "Priorizar plataformas iguais (PC x PC, Mobile x Mobile, Console x Console).",
+            "Sem plataforma igual: instrutor, auxiliar ou observador participa.",
+            "No 2v2 pode misturar (1 Mobile + 1 PC x 1 Mobile + 1 PC), mantendo a igualdade.",
+            "Instrutor escolhe as duplas (balanceadas) ou deixa a critério dos militares.",
+            "Quem recusar a dupla pode ser dispensado.",
+        }),
+        perguntas("2 perguntas", 25, "Só pontua quem acertar todas (não vale 0,5).", false),
+        P("Texto gramatical — 1,0 ponto", {
+            "Mínimo de 7 linhas.",
+            "Tempo: 250 s (PC e Mobile) / 380 s (Console).",
+            "Tema: " .. TEMA_EB .. ".",
+            "Mais de 1 erro: sem ponto.",
+            "Fugiu do tema: sem ponto.",
+            "Sempre apontar o erro gramatical.",
+        }),
+        comandos(15),
+        desempate(2, 8),
+    },
+}
+
+CONTENT["CPE"] = {
+    heading = "CPE — CURSO PREPARATÓRIO DA ELITANIA",
+    items = {
+        minimo("7 pontos  ·  máx. 1 aprovado"),
+        P("Polichinelos — 1,0 ponto", { "PC e Console: 85 JJs.", "Mobile: 125 JJs.", "Tempo: 100 segundos." }),
+        parkours(6, 9, 7, 6),
+        torre(7, 8),
+        perguntas("3 perguntas", 25, "Só pontua quem acertar todas (não vale 0,33).", false),
+        P("Texto gramatical — 1,0 ponto", {
+            "Mínimo de 8 linhas.",
+            "Tempo: 240 s (PC e Mobile) / 360 s (Console).",
+            "Tema: " .. TEMA_EB .. ".",
+            "Qualquer erro: sem ponto.",
+            "Fugiu do tema: sem ponto.",
+            "Sempre apontar o erro gramatical.",
+        }),
+        comandos(20, true),
+        P("PvP", {
+            "Após todas as avaliações, entre os que atingiram o mínimo.",
+            "Somente de FAL; sair da arena é desclassificação.",
+            "Aprovado: apenas o sobrevivente de todos os PvPs.",
+            "Formato (1v1, 2v2) a critério do instrutor, até sobrar um.",
+        }),
+    },
+}
+
+-- =========================================================
+-- Tema e janela
+-- =========================================================
+local function applyTheme()
+    local ok = pcall(function()
+        WindUI:AddTheme({
+            Name = THEME_NAME,
+            Accent = Color3.fromHex("#8B5CF6"),
+            Dialog = Color3.fromHex("#130F1C"),
+            Outline = Color3.fromHex("#2B2340"),
+            Text = Color3.fromHex("#F5F3FF"),
+            Placeholder = Color3.fromHex("#8B84A0"),
+            Background = Color3.fromHex("#0B0910"),
+            Button = Color3.fromHex("#1A1426"),
+            Icon = Color3.fromHex("#C4B5FD"),
+        })
+    end)
+    return ok
+end
+
+local function getWindowSize()
+    local vp = Workspace.CurrentCamera and Workspace.CurrentCamera.ViewportSize or Vector2.new(800, 600)
+    return UDim2.fromOffset(math.clamp(vp.X - 40, 300, 480), math.clamp(vp.Y - 40, 220, 310))
+end
+
+-- Copiar (sem simular)
+local function getClipboardFn()
+    if type(setclipboard) == "function" then return setclipboard end
+    if type(toclipboard) == "function" then return toclipboard end
+    if type(Clipboard) == "table" and type(Clipboard.set) == "function" then return Clipboard.set end
+    return nil
+end
+
+local function copyPresentation()
+    local fn = getClipboardFn()
+    if not fn then
+        WindUI:Notify({
+            Title = "Cópia indisponível",
+            Content = "Seu executor não suporta área de transferência. Nada foi copiado.",
+            Duration = 4,
+        })
+        return false
+    end
+    local ok = pcall(fn, PRESENTATION)
+    WindUI:Notify({
+        Title = ok and "Copiado!" or "Falha ao copiar",
+        Content = ok and "Apresentação copiada." or "O executor retornou erro ao copiar.",
+        Icon = ok and "check" or "x",
+        Duration = 2,
+    })
+    return ok
+end
+
+local themeOk = applyTheme()
+
+local Window = WindUI:CreateWindow({
+    Title = HUB_NAME,
+    Icon = "graduation-cap",
+    Folder = "dripTreinos",
+    Size = getWindowSize(),
+    Theme = themeOk and THEME_NAME or "Dark",
+    HideSearchBar = true,
+    OpenButton = {
+        Title = "",
+        CornerRadius = UDim.new(1, 0),
+        StrokeThickness = 2,
+        Enabled = true,
+        Draggable = true,
+        OnlyMobile = false,
+        Scale = 1,
+        Color = ColorSequence.new(Color3.fromHex("#6D28D9"), PURPLE),
+    },
+    Topbar = { Height = 40, ButtonsType = "Mac" },
+})
+ENV.__TreinamentoHub = { Window = Window }
+
+if themeOk then pcall(function() WindUI:SetTheme(THEME_NAME) end) end
+
+pcall(function()
+    Window:Tag({ Title = "v1.7", Icon = "sparkles", Color = Color3.fromHex("#1A1426"), Border = true })
+end)
+
+-- =========================================================
+-- Abas (carregamento sob demanda)
+-- =========================================================
+local Tabs = {}
+local TabOrder = {}
+
+local function createTab(title, icon, color)
+    local tab = Window:Tab({
+        Title = title,
+        Icon = icon or "bookmark",
+        IconColor = color or PURPLE,
+        IconShape = "Square",
+        Border = true,
+    })
+    Tabs[title] = tab
+    table.insert(TabOrder, title)
+    return tab
+end
+
+local function selectTab(title)
+    local tab = Tabs[title]
+    if not tab then return end
+    local ok = pcall(function() tab:Select() end)
+    if not ok then
+        local index = table.find(TabOrder, title)
+        if index then pcall(function() Window:SelectTab(index) end) end
+    end
+end
+
+-- =========================================================
+-- Renderização compacta (modelo de Praças = padrão de todas as abas)
+-- =========================================================
+local TITLE_SIZE = 13
+local LINE_SIZE = 11
+local LINE_TRANSPARENCY = 0.25
+local BLOCK_GAP = false  -- true = espaço extra entre blocos
+local TIGHTEN = true     -- reduz o vão entre o título e a informação (seguro: usa pcall)
+local INNER_GAP = 2      -- espaço vertical interno (px) entre título e texto; 0 = colado
+local ROOT_GAP = 4       -- espaço (px) entre a linha do título e o conteúdo do bloco
+local DEBUG_UI = false   -- true = imprime no console a hierarquia encontrada
+
+-- Cria a Section; se o Icon não for aceito pela versão da lib, tenta sem ele
+local function newSection(parent, cfg)
+    local ok, sec = pcall(function() return parent:Section(cfg) end)
+    if ok and sec then return sec end
+    cfg.Icon = nil
+    return parent:Section(cfg)
+end
+
+-- Localiza o texto do bloco na interface já criada e reduz os espaçamentos
+-- verticais SOMENTE dos containers entre o texto e o bloco (título preservado).
+local UI_ROOT
+local function scanRoots()
+    if UI_ROOT and UI_ROOT.Parent then return { UI_ROOT } end
+    local roots = {}
+    pcall(function() if gethui then table.insert(roots, gethui()) end end)
+    pcall(function() table.insert(roots, game:GetService("CoreGui")) end)
+    pcall(function()
+        local pg = LocalPlayer:FindFirstChildOfClass("PlayerGui")
+        if pg then table.insert(roots, pg) end
+    end)
+    return roots
+end
+
+local function findLabel(text)
+    for _, root in ipairs(scanRoots()) do
+        for _, d in ipairs(root:GetDescendants()) do
+            if d:IsA("TextLabel") and d.Text == text and not d:GetAttribute("DripTight") then
+                if not UI_ROOT then UI_ROOT = d:FindFirstAncestorOfClass("ScreenGui") end
+                return d
+            end
+        end
+    end
+end
+
+local function hasText(frame, text)
+    for _, d in ipairs(frame:GetDescendants()) do
+        if d:IsA("TextLabel") and d.Text == text then return true end
+    end
+    return false
+end
+
+local function tighten(title, text)
+    if not TIGHTEN then return end
+    task.spawn(function()
+        task.wait(0.05)
+        pcall(function()
+            local label = findLabel(text)
+            if not label then return end
+            label:SetAttribute("DripTight", true)
+
+            -- 1) mapeia a cadeia texto -> raiz do bloco (sem alterar nada ainda)
+            local chain, node = {}, label.Parent
+            while node and #chain < 8 and not hasText(node, title) do
+                table.insert(chain, node)
+                node = node.Parent
+            end
+            if not node or #chain >= 8 then
+                if DEBUG_UI then warn("[Hub] raiz do bloco não encontrada: " .. title) end
+                return
+            end
+
+            -- 2) só então aplica o ajuste
+            for _, frame in ipairs(chain) do
+                for _, c in ipairs(frame:GetChildren()) do
+                    if c:IsA("UIPadding") then
+                        c.PaddingTop = UDim.new(0, INNER_GAP)
+                        c.PaddingBottom = UDim.new(0, INNER_GAP)
+                    elseif c:IsA("UIListLayout") then
+                        c.Padding = UDim.new(0, INNER_GAP)
+                    end
+                end
+                if DEBUG_UI then print("[Hub]", title, frame.ClassName, frame.Name) end
+            end
+            local list = node:FindFirstChildOfClass("UIListLayout")
+            if list then list.Padding = UDim.new(0, ROOT_GAP) end
+        end)
+    end)
+end
+
+local function renderBlock(parent, block)
+    local box = newSection(parent, {
+        Title = block.title,
+        TextSize = TITLE_SIZE,
+        Desc = block.desc,
+        Icon = block.icon,
+        Box = true,
+        BoxBorder = true,
+        Opened = block.opened ~= false,
+    })
+    -- Todas as linhas num único texto, uma por linha
+    if block.lines and #block.lines > 0 then
+        local bullets = {}
+        for _, line in ipairs(block.lines) do
+            table.insert(bullets, "• " .. line)
+        end
+        local joined = table.concat(bullets, "\n")
+        box:Section({
+            Title = joined,
+            TextSize = LINE_SIZE,
+            TextTransparency = LINE_TRANSPARENCY,
+        })
+        tighten(block.title, joined)
+    end
+end
+
+local function buildCategory(name)
+    local tab = createTab(name, CATEGORY_ICONS[name], CATEGORY_COLORS[name])
+    local data = CONTENT[name]
+
+    if not data then
+        tab:Section({
+            Title = name,
+            TextSize = TITLE_SIZE,
+            Desc = "Anotações desta categoria ainda não foram adicionadas.",
+            Box = true,
+            BoxBorder = true,
+        })
+        return
+    end
+
+    tab:Section({ Title = data.heading, TextSize = 16, FontWeight = Enum.FontWeight.SemiBold })
+    tab:Space({ Columns = 1 })
+
+    for _, item in ipairs(data.items) do
+        renderBlock(tab, item)
+        if BLOCK_GAP then tab:Space({ Columns = 1 }) end
+    end
+end
+
+local function openCategory(name)
+    if not Tabs[name] then
+        buildCategory(name)
+    end
+    selectTab(name)
+end
+
+-- =========================================================
+-- Aba Geral
+-- =========================================================
+local function buildGeneralTab()
+    local tab = createTab("Geral", "house", PURPLE)
+
+    local intro = tab:Section({ Title = "Apresentação", Box = true, BoxBorder = true, Opened = true })
+    intro:Section({ Title = PRESENTATION, TextSize = 13, TextTransparency = 0.25 })
+    intro:Space({ Columns = 1 })
+
+    local copyBtn
+    copyBtn = intro:Button({
+        Title = "Copiar apresentação",
+        Icon = "copy",
+        Justify = "Center",
+        Callback = function()
+            pcall(function() copyBtn:Highlight() end)
+            copyPresentation()
+        end,
+    })
+
+    tab:Space({ Columns = 1 })
+
+    local initializing = true
+    tab:Dropdown({
+        Title = "Qual categoria você está treinando?",
+        Values = CATEGORIES,
+        Value = nil,
+        AllowNone = true,
+        Callback = function(selected)
+            if initializing then return end
+            if type(selected) == "table" then selected = selected.Title end
+            if type(selected) == "string" then openCategory(selected) end
+        end,
+    })
+    initializing = false
+
+    -- Créditos: bloco único e compacto, informações sempre visíveis
+    tab:Space({ Columns = 1 })
+    local creditsText = "Criador: " .. CREATOR .. "\nServidor: " .. SERVER
+    local okCredits = pcall(function()
+        tab:Paragraph({ Title = "Créditos", Desc = creditsText })
+    end)
+    if not okCredits then
+        -- Fallback: Section simples (sem Box = sem expandir)
+        tab:Section({ Title = "Créditos", TextSize = 12, Desc = creditsText })
+    end
+end
+
+buildGeneralTab()
+selectTab("Geral")
