@@ -1,6 +1,4 @@
---[[ AUTO TREINO | DRIP MENU — LuaU (client / executor)
-     Ordem: item -> equipar abre menu -> desequipar fecha menu.
-     Dados de tempos extraídos do script de referência (Drip treinos v1.7). ]]
+-- Auto Treino (drip menu)
 
 local Players = game:GetService("Players")
 local UIS = game:GetService("UserInputService")
@@ -13,55 +11,49 @@ if not LocalPlayer then return end
 
 local ENV = (getgenv and getgenv()) or _G
 
--- =========================================================
--- 1. CONFIGURAÇÃO / INICIALIZAÇÃO
--- =========================================================
 local AUTO = {
-    char = ";char me nemokjk", clone = ";clone", title = ";titlebk me INSTRUTOR",
-    clonePos = Vector3.new(23.9, 3.0, -1003.5),  -- localização de clone
-    destPos = Vector3.new(40.8, 3.0, -999.0),    -- lado do botão
-    -- Esperas (em segundos) entre cada passo, para garantir a ordem correta.
-    -- Se algum passo ainda estiver atropelando o próximo, aumente o valor dele.
+    char = ";char me nemokjk",
+    clone = ";clone",
+    title = ";titlebk me INSTRUTOR",
+    clonePos = Vector3.new(23.9, 3.0, -1003.5),
+    destPos = Vector3.new(40.8, 3.0, -999.0),
+    -- tempos de espera entre os passos, se algum passo atropelar o outro é só aumentar
     delays = {
-        chatGap = 1.5,        -- intervalo mínimo entre mensagens no chat
-        charTimeout = 6,      -- tempo máximo esperando o personagem trocar
-        afterChar = 2.0,      -- espera depois que o personagem novo carregou
-        afterTeleport = 1.0,  -- espera depois de chegar na localização
-        afterClone = 3.0,     -- espera o clone ser criado
-        afterDest = 1.0,      -- espera depois de chegar ao lado do botão
+        chatGap = 1.5,
+        charTimeout = 6,
+        afterChar = 2.0,
+        afterTeleport = 1.0,
+        afterClone = 3.0,
+        afterDest = 1.0,
     },
 }
-local MAX_POINTS = 100                          -- AJUSTAR: limite real do sistema é desconhecido
-local TITLER_TEMPLATE = ";titler {NOME} {PONTOS}" -- AJUSTAR: prefixo/sintaxe a confirmar no jogo
+
+local MAX_POINTS = 100
+local TITLER_TEMPLATE = ";titler {NOME} {PONTOS}"
 local CREATOR = "Angel"
 local SERVER_URL = "https://discord.gg/dripmenu"
 local HUB_NAME = "AUTO TREINO"
-local NOTIFY_TIME = 5.5 -- duração padrão das notificações (segundos)
+local NOTIFY_TIME = 5.5
+local TIMER_GAP = 5.7 -- intervalo entre o ";hb ao timer!" e o ";Countdown"
 
--- Reexecução: destrói a instância anterior
+-- se rodar de novo, apaga o anterior
 if ENV.__PranchetaV1 and ENV.__PranchetaV1.Destroy then
     pcall(ENV.__PranchetaV1.Destroy)
 end
 ENV.__PranchetaV1 = nil
 
--- Dados de sessão (sobrevivem à reexecução e ao desequipar)
 local Session = ENV.__PranchetaV1_Session or {}
 ENV.__PranchetaV1_Session = Session
-Session.cfg = Session.cfg or {
-    cmds = { char = ";char me nemokjk", clone = ";clone", title = ";titlebk me INSTRUTOR" },
-    on = { char = true, clone = true, title = true },
-    pos = {},
-}
 
-local conns, toolConns = {}, {}
-local function track(c) table.insert(conns, c); return c end
+local conns = {}
+local function track(c) table.insert(conns, c) return c end
 
--- Tema: preto com detalhes roxos
 local C = {
-    bg = Color3.fromRGB(6, 6, 9), card = Color3.fromRGB(14, 12, 20),
-    btn = Color3.fromRGB(20, 16, 30), btnActive = Color3.fromRGB(70, 42, 128),
-    baby = Color3.fromRGB(178, 134, 255), -- "baby" = cor de destaque (roxo)
-    text = Color3.fromRGB(250, 246, 255), dim = Color3.fromRGB(170, 160, 195),
+    btn = Color3.fromRGB(20, 16, 30),
+    btnActive = Color3.fromRGB(70, 42, 128),
+    baby = Color3.fromRGB(178, 134, 255),
+    text = Color3.fromRGB(250, 246, 255),
+    dim = Color3.fromRGB(170, 160, 195),
     field = Color3.fromRGB(8, 7, 12),
 }
 
@@ -87,26 +79,23 @@ local Gui = new("ScreenGui", { Name = "AutoTreino_Gui", ResetOnSpawn = false, Ig
     DisplayOrder = 100, ZIndexBehavior = Enum.ZIndexBehavior.Sibling })
 Gui.Parent = guiParent()
 
--- =========================================================
--- 2. UTILITÁRIOS (clipboard, chat, arrastar)
--- =========================================================
+
 local function getClipboardFn()
     if type(setclipboard) == "function" then return setclipboard end
     if type(toclipboard) == "function" then return toclipboard end
-    return nil
 end
 
-local notify -- declarada abaixo
+local notify
 
 local function copyText(text, okTitle)
     local fn = getClipboardFn()
     if not fn then
-        notify("error", "Cópia indisponível", "O executor não suporta área de transferência. Nada foi copiado.", NOTIFY_TIME)
+        notify("error", "Cópia indisponível", "O executor não suporta área de transferência. Nada foi copiado.")
         return false
     end
     local ok = pcall(fn, text)
-    if ok then notify("success", okTitle or "Copiado", "Texto copiado para a área de transferência.", NOTIFY_TIME)
-    else notify("error", "Falha ao copiar", "Não foi possível copiar o texto. Tente novamente.", NOTIFY_TIME) end
+    if ok then notify("success", okTitle or "Copiado", "Texto copiado para a área de transferência.")
+    else notify("error", "Falha ao copiar", "Não foi possível copiar o texto. Tente novamente.") end
     return ok
 end
 
@@ -126,24 +115,23 @@ local function sendChat(text)
     end)
 end
 
--- Envia uma ou mais linhas ao chat, em ordem, respeitando o intervalo entre mensagens
+-- manda as linhas em ordem, com intervalo entre elas
 local sending = false
 local lastSent = 0
 local function sendLines(lines, what)
-    if sending or os.clock() - lastSent < 1 then return false end -- evita envio duplicado
+    if sending or os.clock() - lastSent < 1 then return false end
     sending = true
     lastSent = os.clock()
     task.spawn(function()
         for i, text in ipairs(lines) do
-            if i > 1 then task.wait(AUTO.delays.chatGap) end
-            local ok = sendChat(text)
-            if not ok then
-                notify("error", "Falha ao enviar", "Não foi possível enviar a mensagem ao chat. Tente novamente.", NOTIFY_TIME)
+            if i > 1 then task.wait(TIMER_GAP) end
+            if not sendChat(text) then
+                notify("error", "Falha ao enviar", "Não foi possível enviar a mensagem ao chat. Tente novamente.")
                 sending = false
                 return
             end
         end
-        notify("success", what, "Mensagem enviada com sucesso.", NOTIFY_TIME)
+        notify("success", what, "Mensagem enviada com sucesso.")
         sending = false
     end)
     return true
@@ -157,8 +145,9 @@ local function makeDraggable(handle, target)
     track(handle.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
             dragging, startPos, startFrame = true, input.Position, target.Position
-            local c; c = input.Changed:Connect(function()
-                if input.UserInputState == Enum.UserInputState.End then dragging = false; c:Disconnect() end
+            local c
+            c = input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then dragging = false c:Disconnect() end
             end)
         end
     end))
@@ -172,9 +161,8 @@ local function makeDraggable(handle, target)
     end))
 end
 
--- =========================================================
--- 3. SISTEMA DE NOTIFICAÇÕES
--- =========================================================
+
+-- notificações
 local notifyHolder = new("Frame", { BackgroundTransparency = 1, AnchorPoint = Vector2.new(1, 0),
     Position = UDim2.new(1, -12, 0.18, 0), Size = UDim2.fromOffset(290, 0),
     AutomaticSize = Enum.AutomaticSize.Y, ZIndex = 50 }, Gui)
@@ -182,16 +170,17 @@ new("UIListLayout", { Padding = UDim.new(0, 6), HorizontalAlignment = Enum.Horiz
     SortOrder = Enum.SortOrder.LayoutOrder }, notifyHolder)
 
 local KIND_COLOR = {
-    success = Color3.fromRGB(140, 238, 185), warn = Color3.fromRGB(255, 218, 115),
-    error = Color3.fromRGB(255, 145, 160), info = Color3.fromRGB(205, 170, 255),
+    success = Color3.fromRGB(140, 238, 185),
+    warn = Color3.fromRGB(255, 218, 115),
+    error = Color3.fromRGB(255, 145, 160),
+    info = Color3.fromRGB(205, 170, 255),
 }
 local activeNotifs = {}
 
-notify = function(kind, title, msg, duration)
+notify = function(kind, title, msg)
     local key = tostring(title) .. "|" .. tostring(msg)
-    if activeNotifs[key] then return end -- sem duplicadas
+    if activeNotifs[key] then return end
     activeNotifs[key] = true
-    duration = NOTIFY_TIME -- tempo padrão de todas as notificações
     local accent = KIND_COLOR[kind] or C.baby
 
     local wrap = new("Frame", { BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 0),
@@ -213,41 +202,40 @@ notify = function(kind, title, msg, duration)
     TweenService:Create(box, TweenInfo.new(0.35, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
         { Position = UDim2.fromOffset(0, 0) }):Play()
     TweenService:Create(st, TweenInfo.new(0.9, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, 1, true),
-        { Transparency = 0 }):Play() -- brilho discreto
+        { Transparency = 0 }):Play()
 
-    task.delay(duration, function()
-        if not box.Parent then activeNotifs[key] = nil; return end
+    task.delay(NOTIFY_TIME, function()
+        if not box.Parent then activeNotifs[key] = nil return end
         local t = TweenService:Create(box, TweenInfo.new(0.35, Enum.EasingStyle.Quint, Enum.EasingDirection.In),
             { Position = UDim2.fromOffset(320, 0) })
-        t:Play(); t.Completed:Wait()
+        t:Play()
+        t.Completed:Wait()
         wrap:Destroy()
         activeNotifs[key] = nil
     end)
 end
 
--- =========================================================
--- 4. DADOS (extraídos do script de referência)
--- =========================================================
+
+-- dados do treinamento
 local CATEGORIES = { "Praças", "Graduados", "AMAN", "Oficiais Subalternos", "Oficiais Intermediários",
     "Oficiais Superiores", "EPC", "APG", "CPE" }
 
 local DATA = {
     ["Praças"] = { min = "4 pontos", jj = "150 JJs em 210 s.", pk = { 35, 40, 30, 32 }, torre = { 15, 16 } },
     ["Graduados"] = { min = "5 pontos", jj = "170 JJs em 230 s.", pk = { 30, 35, 27, 29 }, torre = { 15, 16 } },
-    ["AMAN"] = { min = "7 pontos · máx. 4 aprovados", jj = "PC e Console: 75 JJs. Celular: 100 JJs. Tempo: 100 s.",
+    ["AMAN"] = { min = "7 pontos, máx. 4 aprovados", jj = "PC e Console: 75 JJs. Celular: 100 JJs. Tempo: 100 s.",
         pk = { 19, 22, 19, 17 }, torre = { 12, 11 } },
     ["Oficiais Subalternos"] = { min = "5 pontos", jj = "200 JJs em 260 s.", pk = { 14, 17, 15, 13 }, torre = { 11, 11 } },
     ["Oficiais Intermediários"] = { min = "5,5 pontos", jj = "250 JJs em 310 s.", pk = { 13, 16, 14, 12 }, torre = { 11, 11 } },
     ["Oficiais Superiores"] = { min = "6 pontos", jj = "320 JJs em 380 s.", pk = { 12, 15, 13, 11 }, torre = { 10, 10 } },
-    ["EPC"] = { min = "7 pontos · máx. 3 aprovados", jj = "PC e Console: 80 JJs. Mobile: 115 JJs. Tempo: 100 s.",
+    ["EPC"] = { min = "7 pontos, máx. 3 aprovados", jj = "PC e Console: 80 JJs. Mobile: 115 JJs. Tempo: 100 s.",
         pk = { 9, 13, 9, 10 }, torre = { 8, 9 } },
-    ["APG"] = { min = "8 pontos · máx. 2 aprovados", jj = "PC e Console: 82 JJs. Mobile: 120 JJs. Tempo: 100 s.",
+    ["APG"] = { min = "8 pontos, máx. 2 aprovados", jj = "PC e Console: 82 JJs. Mobile: 120 JJs. Tempo: 100 s.",
         pk = { 11, 13, 10, 6 }, torre = { 7, 8 }, nota = "Parkour 4 é com burla; os demais, sem burla." },
-    ["CPE"] = { min = "7 pontos · máx. 1 aprovado", jj = "PC e Console: 85 JJs. Mobile: 125 JJs. Tempo: 100 s.",
+    ["CPE"] = { min = "7 pontos, máx. 1 aprovado", jj = "PC e Console: 85 JJs. Mobile: 125 JJs. Tempo: 100 s.",
         pk = { 6, 9, 7, 6 }, torre = { 7, 8 } },
 }
 
--- 8 versões de apresentação, todas em primeira pessoa
 local PRESENTATIONS = {
     ";hb Atenção, militares! Eu sou {USERNAME} e serei o instrutor de vocês neste treinamento. Exijo respeito e disciplina.",
     ";hb Bom treinamento a todos! Meu nome é {USERNAME} e serei o instrutor de vocês. Peço respeito e disciplina.",
@@ -263,23 +251,20 @@ local function presentationText(i)
     return (PRESENTATIONS[i]:gsub("{USERNAME}", function() return LocalPlayer.Name end))
 end
 
--- Tempos em segundos (número) da categoria selecionada
 local function parkourSeconds(i)
     local d = DATA[Session.category or ""]
-    return d and d.pk[i] or nil
+    return d and d.pk[i]
 end
-local function torreSeconds(idx) -- 1 = PC/Console, 2 = Celular
+local function torreSeconds(idx) -- 1 = pc/console, 2 = celular
     local d = DATA[Session.category or ""]
-    return d and d.torre[idx] or nil
+    return d and d.torre[idx]
 end
--- Bloco de timer: duas linhas enviadas em sequência
 local function timerLines(seconds)
     return { ";hb ao timer!", ";Countdown " .. seconds }
 end
 
--- =========================================================
--- 5. INTERFACE
--- =========================================================
+
+-- interface
 local vp = Workspace.CurrentCamera and Workspace.CurrentCamera.ViewportSize or Vector2.new(800, 600)
 local W = math.clamp(vp.X - 30, 280, 340)
 local H = math.clamp(vp.Y - 60, 220, 310)
@@ -321,7 +306,8 @@ local function button(parent, text, cb, props)
         AutomaticSize = Enum.AutomaticSize.X, BorderSizePixel = 0 })
     for k, v in pairs(props or {}) do b[k] = v end
     if props and props.Size then b.AutomaticSize = Enum.AutomaticSize.None end
-    corner(b, 6); stroke(b, C.baby, 0.3, 1)
+    corner(b, 6)
+    stroke(b, C.baby, 0.3, 1)
     new("UIPadding", { PaddingLeft = UDim.new(0, 10), PaddingRight = UDim.new(0, 10) }, b)
     b.Activated:Connect(function()
         if b:GetAttribute("Off") then return end
@@ -338,7 +324,8 @@ end
 local function card(parent, title)
     local f = new("Frame", { BackgroundColor3 = Color3.new(1, 1, 1), BorderSizePixel = 0, Size = UDim2.new(1, 0, 0, 0),
         AutomaticSize = Enum.AutomaticSize.Y }, parent)
-    corner(f, 8); stroke(f, C.baby, 0.65, 1)
+    corner(f, 8)
+    stroke(f, C.baby, 0.65, 1)
     new("UIGradient", { Rotation = 90, Color = ColorSequence.new(Color3.fromRGB(18, 15, 26), Color3.fromRGB(8, 7, 12)) }, f)
     new("UIPadding", { PaddingTop = UDim.new(0, 8), PaddingBottom = UDim.new(0, 8),
         PaddingLeft = UDim.new(0, 8), PaddingRight = UDim.new(0, 8) }, f)
@@ -357,7 +344,8 @@ local function textBox(parent, text, placeholder, height)
         TextSize = 11, Text = text or "", PlaceholderText = placeholder or "", PlaceholderColor3 = C.dim,
         ClearTextOnFocus = false, TextXAlignment = Enum.TextXAlignment.Left, Size = UDim2.new(1, 0, 0, height or 26),
         BorderSizePixel = 0 }, parent)
-    corner(t, 6); stroke(t, C.baby, 0.7, 1)
+    corner(t, 6)
+    stroke(t, C.baby, 0.7, 1)
     new("UIPadding", { PaddingLeft = UDim.new(0, 6), PaddingRight = UDim.new(0, 6) }, t)
     return t
 end
@@ -383,18 +371,21 @@ local function addTab(name)
     local i = #tabButtons + 1
     local b = new("TextButton", { BackgroundColor3 = C.btn, Font = Enum.Font.GothamBold, TextSize = 9, TextColor3 = C.text,
         Text = name, Size = UDim2.new(1 / 3, -3, 1, -4), BorderSizePixel = 0, TextTruncate = Enum.TextTruncate.AtEnd }, TabBar)
-    corner(b, 6); stroke(b, C.baby, 0.5, 1)
+    corner(b, 6)
+    stroke(b, C.baby, 0.5, 1)
     b.Activated:Connect(function() setTab(i) end)
     tabButtons[i] = b
 end
 
--- ---------- ABA GERAL ----------
+
+-- aba geral
 local refreshers = {}
 local categoryInfoLabel
+
 local function setCategory(name, silent)
     Session.category = name
     for _, fn in ipairs(refreshers) do fn() end
-    if not silent then notify("info", "Categoria selecionada", name, NOTIFY_TIME) end
+    if not silent then notify("info", "Categoria selecionada", name) end
 end
 
 local function buildGeral()
@@ -420,7 +411,6 @@ local function buildGeral()
         end, { Size = UDim2.new(1, 0, 0, 24) })
     end
 
-    -- Auto organizar
     local auto = card(p, "AUTO SE ORGANIZAR")
     label(auto, "Esta ferramenta auxilia na preparação do personagem para o treinamento, incluindo personagem de referência, posicionamento, clonagem e título de instrutor, conforme os comandos disponíveis no jogo.", 10, false, C.dim)
     local autoBtn
@@ -439,27 +429,26 @@ local function buildGeral()
             if r then return r end
             task.wait(0.1)
         end
-        return nil
     end
-    local function chatStep(cmd) -- respeita intervalo mínimo entre mensagens (anti-flood)
+    local function chatStep(cmd)
         local gap = os.clock() - lastChat
         if gap < D.chatGap then task.wait(D.chatGap - gap) end
         local ok, err = sendChat(cmd)
         lastChat = os.clock()
         return ok, err
     end
-    -- Teleporta e "segura" a posição por um instante, pois o jogo pode puxar o personagem de volta
+    -- o jogo às vezes puxa o personagem de volta, por isso teleporta várias vezes
     local function goTo(pos)
         local ok = false
         for _ = 1, 5 do
             local r = waitRoot(5)
-            if r then r.CFrame = CFrame.new(pos); ok = true end
+            if r then r.CFrame = CFrame.new(pos) ok = true end
             task.wait(0.1)
         end
         return ok
     end
     local function fail(msg)
-        notify("error", "Auto Organizar interrompido", msg, NOTIFY_TIME)
+        notify("error", "Auto Organizar interrompido", msg)
         running = false
         setEnabled(autoBtn, true)
     end
@@ -468,61 +457,63 @@ local function buildGeral()
         if running then return end
         running = true
         setEnabled(autoBtn, false)
-        notify("info", "Auto Organizar", "Iniciando preparação do instrutor.", NOTIFY_TIME)
+        notify("info", "Auto Organizar", "Iniciando preparação do instrutor.")
 
-        -- 1) Char
-        notify("info", "Passo 1/5", "Enviando comando de personagem.", NOTIFY_TIME)
+        -- 1 char
+        notify("info", "Passo 1/5", "Enviando comando de personagem.")
         local oldChar = LocalPlayer.Character
         local ok, err = chatStep(AUTO.char)
         if not ok then return fail("Falha ao enviar " .. AUTO.char .. ": " .. tostring(err)) end
         local t0 = os.clock()
         while LocalPlayer.Character == oldChar and os.clock() - t0 < D.charTimeout do task.wait(0.1) end
         if LocalPlayer.Character == oldChar then
-            notify("warn", "Personagem", "Sem confirmação de troca de personagem; seguindo.", NOTIFY_TIME)
+            notify("warn", "Personagem", "Sem confirmação de troca de personagem; seguindo.")
         end
         waitRoot(5)
         task.wait(D.afterChar)
 
-        -- 2) Localização do clone
-        notify("info", "Passo 2/5", "Indo para a localização do clone.", NOTIFY_TIME)
+        -- 2 local do clone
+        notify("info", "Passo 2/5", "Indo para a localização do clone.")
         if not goTo(AUTO.clonePos) then return fail("Personagem indisponível para ir à localização de clone.") end
         task.wait(D.afterTeleport)
 
-        -- 3) Clone
-        notify("info", "Passo 3/5", "Enviando comando de clone.", NOTIFY_TIME)
+        -- 3 clone
+        notify("info", "Passo 3/5", "Enviando comando de clone.")
         ok, err = chatStep(AUTO.clone)
         if not ok then return fail("Falha ao enviar " .. AUTO.clone .. ": " .. tostring(err)) end
         task.wait(D.afterClone)
 
-        -- 4) Localização do lado do botão
-        notify("info", "Passo 4/5", "Indo para o lado do botão.", NOTIFY_TIME)
+        -- 4 lado do botão
+        notify("info", "Passo 4/5", "Indo para o lado do botão.")
         if not goTo(AUTO.destPos) then return fail("Personagem indisponível para ir à posição final.") end
         task.wait(D.afterDest)
 
-        -- 5) Titlebk instrutor
-        notify("info", "Passo 5/5", "Enviando título de instrutor.", NOTIFY_TIME)
+        -- 5 titlebk
+        notify("info", "Passo 5/5", "Enviando título de instrutor.")
         ok, err = chatStep(AUTO.title)
         if not ok then return fail("Falha ao enviar " .. AUTO.title .. ": " .. tostring(err)) end
 
-        notify("success", "Auto Organizar", "Concluído: comandos enviados e posições aplicadas.", NOTIFY_TIME)
+        notify("success", "Auto Organizar", "Concluído: comandos enviados e posições aplicadas.")
         running = false
         setEnabled(autoBtn, true)
     end
     autoBtn = button(auto, "AUTO ORGANIZAR", function() task.spawn(runAuto) end, { Size = UDim2.new(1, 0, 0, 30) })
 end
 
--- ---------- ABA MSG PRONTA ----------
--- getLines retorna uma tabela de linhas (enviadas em sequência) ou nil se não houver dados
+
+-- aba msg pronta
 local function messageCard(parent, title, getLines, extra)
     local c = card(parent, title)
     local msg = label(c, "", 11)
     local r = row(c)
     local sendBtn = button(r, "ENVIAR", function()
-        local l = getLines(); if l then sendLines(l, title) end
+        local l = getLines()
+        if l then sendLines(l, title) end
     end)
     for _, e in ipairs(extra or {}) do button(r, e[1], e[2]) end
     button(r, "COPIAR", function()
-        local l = getLines(); if l then copyText(table.concat(l, "\n")) end
+        local l = getLines()
+        if l then copyText(table.concat(l, "\n")) end
     end)
     local function update()
         local l = getLines()
@@ -536,7 +527,7 @@ end
 
 local function buildMsg()
     local p = newPage()
-    -- Apresentação
+
     local cur = math.random(#PRESENTATIONS)
     local upd
     upd = messageCard(p, "APRESENTAÇÃO", function() return { presentationText(cur) } end, {
@@ -547,39 +538,44 @@ local function buildMsg()
             upd()
         end },
     })
-    -- Marcha
+
     local m = card(p, "MARCHA")
-    local m1 = card(m, "Preparar"); label(m1, ";hb PREPARAR PARA MARCHAR!", 11)
+    local m1 = card(m, "Preparar")
+    label(m1, ";hb PREPARAR PARA MARCHAR!", 11)
     button(m1, "ENVIAR", function() sendAction(";hb PREPARAR PARA MARCHAR!", "Preparar para marchar") end)
-    local m2 = card(m, "Marchar"); label(m2, ";hb MARCHEM!", 11)
+    local m2 = card(m, "Marchar")
+    label(m2, ";hb MARCHEM!", 11)
     button(m2, "ENVIAR", function() sendAction(";hb MARCHEM!", "Marchem") end)
 
-    -- Tempos
     local t = card(p, "TEMPOS DO TREINAMENTO")
     categoryInfoLabel = label(t, "", 10, false, C.dim)
     local function updateInfo()
         local d = DATA[Session.category or ""]
-        if not d then categoryInfoLabel.Text = "Nenhuma categoria selecionada (aba Geral)."; return end
+        if not d then categoryInfoLabel.Text = "Nenhuma categoria selecionada (aba Geral)." return end
         categoryInfoLabel.Text = "Categoria: " .. Session.category .. "\nMínimo: " .. d.min .. "\nPolichinelos: " .. d.jj
             .. (d.nota and ("\n" .. d.nota) or "")
     end
-    table.insert(refreshers, updateInfo); updateInfo()
+    table.insert(refreshers, updateInfo)
+    updateInfo()
     for i = 1, 4 do
-        local u = messageCard(t, "PARKOUR " .. i, function()
-            local s = parkourSeconds(i); return s and timerLines(s) or nil
-        end)
-        table.insert(refreshers, u)
+        table.insert(refreshers, messageCard(t, "PARKOUR " .. i, function()
+            local s = parkourSeconds(i)
+            return s and timerLines(s) or nil
+        end))
     end
-    table.insert(refreshers, messageCard(t, "TORRE · PC/CONSOLE", function()
-        local s = torreSeconds(1); return s and timerLines(s) or nil
+    table.insert(refreshers, messageCard(t, "TORRE (PC/CONSOLE)", function()
+        local s = torreSeconds(1)
+        return s and timerLines(s) or nil
     end))
-    table.insert(refreshers, messageCard(t, "TORRE · CELULAR", function()
-        local s = torreSeconds(2); return s and timerLines(s) or nil
+    table.insert(refreshers, messageCard(t, "TORRE (CELULAR)", function()
+        local s = torreSeconds(2)
+        return s and timerLines(s) or nil
     end))
 end
 
--- ---------- ABA PONTOS / ANOTAÇÕES ----------
-local startSelection -- definida abaixo
+
+-- aba pontos / notas
+local startSelection
 
 local function buildNotes()
     local p = newPage()
@@ -589,26 +585,28 @@ local function buildNotes()
         PlaceholderColor3 = C.dim, ClearTextOnFocus = false, MultiLine = true, TextWrapped = true,
         TextXAlignment = Enum.TextXAlignment.Left, TextYAlignment = Enum.TextYAlignment.Top,
         Size = UDim2.new(1, 0, 0, 110), BorderSizePixel = 0 }, n)
-    corner(box, 6); stroke(box, C.baby, 0.7, 1)
+    corner(box, 6)
+    stroke(box, C.baby, 0.7, 1)
     new("UIPadding", { PaddingLeft = UDim.new(0, 6), PaddingRight = UDim.new(0, 6), PaddingTop = UDim.new(0, 4) }, box)
     local counter = label(n, "", 9, false, C.dim)
     local function upCount() counter.Text = #box.Text .. " caracteres" end
     upCount()
     box:GetPropertyChangedSignal("Text"):Connect(upCount)
 
-    -- Somente limpar (sem salvar e sem copiar)
     local r = row(n)
     local clearBtn, confirming
     clearBtn = button(r, "LIMPAR", function()
         if not confirming then
-            confirming = true; clearBtn.Text = "CONFIRMAR?"
+            confirming = true
+            clearBtn.Text = "CONFIRMAR?"
             task.delay(3, function()
-                if confirming and clearBtn.Parent then confirming = false; clearBtn.Text = "LIMPAR" end
+                if confirming and clearBtn.Parent then confirming = false clearBtn.Text = "LIMPAR" end
             end)
         else
-            confirming = false; clearBtn.Text = "LIMPAR"
+            confirming = false
+            clearBtn.Text = "LIMPAR"
             box.Text = ""
-            notify("info", "Anotações limpas", "O texto foi apagado.", NOTIFY_TIME)
+            notify("info", "Anotações limpas", "O texto foi apagado.")
         end
     end)
 
@@ -617,11 +615,11 @@ local function buildNotes()
     button(pts, "PONTOS", function() startSelection() end, { Size = UDim2.new(1, 0, 0, 28) })
 end
 
--- =========================================================
--- 6. ABRIR / FECHAR MENU
--- =========================================================
+
+-- abrir e fechar o menu
 local menuToken = 0
 local menuOpen = false
+
 local function openMenu()
     menuOpen = true
     menuToken += 1
@@ -643,15 +641,15 @@ end
 
 button(TitleBar, "X", function() closeMenu() end, { Size = UDim2.fromOffset(24, 20), Position = UDim2.new(1, -32, 0, 5) })
 
--- =========================================================
--- 7. SELEÇÃO DE MILITAR + JANELA DE PONTOS
--- =========================================================
+
+-- seleção do militar e janela de pontos
 local selecting, selConn, selectedPlayer = false, nil, nil
 
 local Hint = new("Frame", { BackgroundColor3 = Color3.fromRGB(8, 7, 12), AnchorPoint = Vector2.new(0.5, 1),
     Position = UDim2.new(0.5, 0, 1, -24), Size = UDim2.fromOffset(260, 0), AutomaticSize = Enum.AutomaticSize.Y,
     Visible = false, ZIndex = 40 }, Gui)
-corner(Hint, 10); stroke(Hint, C.baby, 0.4, 1)
+corner(Hint, 10)
+stroke(Hint, C.baby, 0.4, 1)
 new("UIPadding", { PaddingTop = UDim.new(0, 8), PaddingBottom = UDim.new(0, 8), PaddingLeft = UDim.new(0, 10), PaddingRight = UDim.new(0, 10) }, Hint)
 new("UIListLayout", { Padding = UDim.new(0, 5), HorizontalAlignment = Enum.HorizontalAlignment.Center }, Hint)
 local hintLabel = label(Hint, "Toque/clique em um militar para registrar pontos.", 11)
@@ -660,7 +658,8 @@ hintLabel.TextXAlignment = Enum.TextXAlignment.Center
 local PointsWin = new("Frame", { BackgroundColor3 = Color3.fromRGB(8, 7, 12), Size = UDim2.fromOffset(250, 0),
     AutomaticSize = Enum.AutomaticSize.Y, AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.45),
     Visible = false, ZIndex = 45 }, Gui)
-corner(PointsWin, 10); stroke(PointsWin, C.baby, 0.4, 1)
+corner(PointsWin, 10)
+stroke(PointsWin, C.baby, 0.4, 1)
 new("UIGradient", { Rotation = 90, Color = ColorSequence.new(Color3.fromRGB(4, 4, 7), Color3.fromRGB(20, 14, 34)) }, PointsWin)
 local pwHandle = new("TextLabel", { BackgroundTransparency = 1, Font = Enum.Font.GothamBold, TextSize = 12, TextColor3 = C.baby,
     Text = "REGISTRAR PONTOS", Size = UDim2.new(1, 0, 0, 28), ZIndex = 46 }, PointsWin)
@@ -674,13 +673,12 @@ local pwName = textBox(pwBody, "", "")
 pwName.TextEditable = false
 label(pwBody, "Quantidade de pontos (1 a " .. MAX_POINTS .. ")", 10, false, C.dim)
 local pwQty = textBox(pwBody, "", "ex.: 3")
-pwQty.ClearTextOnFocus = false
 local pwRow = row(pwBody)
 makeDraggable(pwHandle, PointsWin)
 
 local function endSelection()
     selecting = false
-    if selConn then selConn:Disconnect(); selConn = nil end
+    if selConn then selConn:Disconnect() selConn = nil end
     Hint.Visible = false
 end
 local function closePointsWin(reopen)
@@ -696,20 +694,19 @@ end
 
 local function pickPlayerAt(pos)
     local cam = Workspace.CurrentCamera
-    if not cam then return nil end
+    if not cam then return end
     local ray = cam:ScreenPointToRay(pos.X, pos.Y)
     local params = RaycastParams.new()
     params.FilterType = Enum.RaycastFilterType.Exclude
     params.FilterDescendantsInstances = { LocalPlayer.Character }
     local res = Workspace:Raycast(ray.Origin, ray.Direction * 1000, params)
-    if not res then return nil end
+    if not res then return end
     local model = res.Instance:FindFirstAncestorOfClass("Model")
     while model do
         local plr = Players:GetPlayerFromCharacter(model)
         if plr then return plr end
         model = model.Parent and model.Parent:FindFirstAncestorOfClass("Model")
     end
-    return nil
 end
 
 startSelection = function()
@@ -722,7 +719,7 @@ startSelection = function()
         if input.UserInputType ~= Enum.UserInputType.MouseButton1 and input.UserInputType ~= Enum.UserInputType.Touch then return end
         local plr = pickPlayerAt(input.Position)
         if not plr then return end
-        if plr == LocalPlayer then notify("warn", "Seleção inválida", "Selecione outro militar.", NOTIFY_TIME); return end
+        if plr == LocalPlayer then notify("warn", "Seleção inválida", "Selecione outro militar.") return end
         endSelection()
         selectedPlayer = plr
         pwName.Text = plr.Name
@@ -736,46 +733,52 @@ button(pwRow, "CONFIRMAR", function()
     if confirmBusy then return end
     local plr = selectedPlayer
     if not plr or plr.Parent ~= Players then
-        notify("error", "Militar inválido", "O militar selecionado saiu do servidor.", NOTIFY_TIME)
-        closePointsWin(true); return
+        notify("error", "Militar inválido", "O militar selecionado saiu do servidor.")
+        closePointsWin(true)
+        return
     end
     local n = tonumber(pwQty.Text)
     if not n or n ~= math.floor(n) or n < 1 or n > MAX_POINTS then
-        notify("error", "Valor inválido", "Informe um número inteiro de 1 a " .. MAX_POINTS .. ".", NOTIFY_TIME); return
+        notify("error", "Valor inválido", "Informe um número inteiro de 1 a " .. MAX_POINTS .. ".")
+        return
     end
     confirmBusy = true
     local msg = TITLER_TEMPLATE:gsub("{NOME}", function() return plr.Name end)
     msg = msg:gsub("{PONTOS}", function() return tostring(n) end)
-    local ok = sendChat(msg)
-    if ok then
-        notify("success", "Comando enviado", "Pontuação dada ao militar.", NOTIFY_TIME)
+    if sendChat(msg) then
+        notify("success", "Comando enviado", "Pontuação dada ao militar.")
     else
         local copied = false
         local fn = getClipboardFn()
         if fn then copied = pcall(fn, msg) end
         notify("error", "Falha no envio", copied
             and "Não foi possível enviar o comando pelo chat. Ele foi copiado para envio manual."
-            or "Não foi possível enviar o comando pelo chat. Tente novamente.", NOTIFY_TIME)
+            or "Não foi possível enviar o comando pelo chat. Tente novamente.")
     end
     confirmBusy = false
     closePointsWin(true)
 end)
 button(pwRow, "CANCELAR", function() closePointsWin(true) end)
-button(Hint, "CANCELAR", function() endSelection(); openMenu() end)
+button(Hint, "CANCELAR", function() endSelection() openMenu() end)
 
--- Logo "AUTO TREINO" (pequeno, deitado, arrastável) — único acesso ao menu
+
+-- logo que abre o menu
 local Logo = new("TextButton", { Text = HUB_NAME, Font = Enum.Font.GothamBlack, TextSize = 11,
     TextColor3 = C.baby, BackgroundColor3 = Color3.fromRGB(6, 6, 9), Size = UDim2.fromOffset(102, 26),
     Position = UDim2.new(0, 12, 0.25, 0), AutoButtonColor = false, ZIndex = 30, BorderSizePixel = 0 }, Gui)
-corner(Logo, 13); stroke(Logo, C.baby, 0.1, 1.5)
+corner(Logo, 13)
+stroke(Logo, C.baby, 0.1, 1.5)
+
 do
     local drag, moved, startIn, startPos = false, false, nil, nil
     track(Logo.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
             drag, moved, startIn, startPos = true, false, input.Position, Logo.Position
-            local c; c = input.Changed:Connect(function()
+            local c
+            c = input.Changed:Connect(function()
                 if input.UserInputState == Enum.UserInputState.End then
-                    c:Disconnect(); drag = false
+                    c:Disconnect()
+                    drag = false
                     if not moved then
                         if menuOpen then closeMenu()
                         elseif not selecting and not PointsWin.Visible then openMenu() end
@@ -795,11 +798,13 @@ do
     end))
 end
 
--- =========================================================
--- 8. INICIALIZAÇÃO E LIMPEZA
--- =========================================================
-addTab("GERAL"); addTab("MSG PRONTA"); addTab("PONTOS / NOTAS")
-buildGeral(); buildMsg(); buildNotes()
+
+addTab("GERAL")
+addTab("MSG PRONTA")
+addTab("PONTOS / NOTAS")
+buildGeral()
+buildMsg()
+buildNotes()
 setTab(1)
 if Session.category then setCategory(Session.category, true) end
 
